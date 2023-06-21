@@ -1,7 +1,7 @@
 class MoviesScrapper {
   constructor() {
-    this.movies = [];
-    console.log(this.movies);
+    this._movies = [];
+    this._url = 'https://us-central1-proxy-24e43.cloudfunctions.net/api?url=';
   }
 
   async loadMovies() {
@@ -9,9 +9,8 @@ class MoviesScrapper {
     let hasMovies = true;
 
     while (hasMovies) {
-      const url = `https://us-central1-proxy-24e43.cloudfunctions.net/api?url=https://www.kinopoisk.ru/lists/movies/top250/?page=${page}`;
-      const response = await fetch(url);
-      const html = await response.text();
+      const link = `https://www.kinopoisk.ru/lists/movies/top250/?page=${page}`;
+      const html = await this._fetchMoviesHTML(link);
       const links = this._extractMovieLinks(html);
       if (links.length === 0) {
         hasMovies = false;
@@ -22,107 +21,113 @@ class MoviesScrapper {
     }
   }
 
-  async _loadMoviesFromLinks(links) {
-    for (const link of links) {
-      const url = `https://us-central1-proxy-24e43.cloudfunctions.net/api?url=${link}`;
-      const response = await fetch(url);
-      const html = await response.text();
-      const movie = this._parseMovie(html);
-      this.movies.push(movie);
-    }
-    const moviesWithUndefined = this.movies.filter((movie) =>
-      Object.values(movie).includes(undefined)
-    );
-
-    console.log(moviesWithUndefined);
+  async _fetchMoviesHTML(link) {
+    const response = await fetch(`${this._url}${link}`);
+    const html = await response.text();
+    return html;
   }
 
   _extractMovieLinks(html) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = this._parseHTMLDocument(html);
     const links = doc.querySelectorAll('[class^="styles_poster"]');
-
-    return Array.from(links).map((link) => {
-      const href = link.href.replace(
+    const href = Array.from(links).map((link) => {
+      return link.href.replace(
         /^http:\/\/127\.0\.0\.1:5500/,
         'https://www.kinopoisk.ru'
       );
-      return href;
     });
+    return href;
+  }
+
+  _parseHTMLDocument(html) {
+    const parser = new DOMParser();
+    return parser.parseFromString(html, 'text/html');
+  }
+
+  async _loadMoviesFromLinks(links) {
+    for (const link of links) {
+      const html = await this._fetchMoviesHTML(link);
+      const movie = this._parseMovie(html);
+      this._movies.push(movie);
+    }
+  }
+
+  _findElementByXPath(doc, xpath) {
+    const element = doc.evaluate(
+      xpath,
+      doc,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    ).singleNodeValue;
+
+    return element;
+  }
+
+  _getIdFromHref(href) {
+    const start = href.indexOf('/film/') + 6;
+    const end = href.indexOf('/', start);
+    const id = href.substring(start, end);
+
+    return id;
+  }
+
+  _parseId(doc) {
+    const xpath = '//a[contains(@class, "film-rating-value")]';
+    const ratingLinkHref = this._findElementByXPath(doc, xpath).href;
+    const filmId = parseInt(this._getIdFromHref(ratingLinkHref));
+
+    return filmId;
   }
 
   _parseTitle(doc) {
-    return doc
-      .querySelector('[data-tid="75209b22"]')
-      .textContent.replace(/\s+/g, ' ')
+    const titleElement = doc.querySelector('[data-tid="75209b22"]');
+    const title = titleElement.textContent
+      .replace(/\s+/g, ' ')
       .trim()
       .replace(/\s*\(\d+\)$/, '');
+
+    return title;
   }
 
   _parseDescription(doc) {
-    return doc
-      .querySelector('[data-tid="bbb11238"]')
-      .textContent.replace(/\s+/g, ' ')
+    const descriptionElement = doc.querySelector('[data-tid="bbb11238"]');
+    const description = descriptionElement.textContent
+      .replace(/\s+/g, ' ')
       .trim();
+
+    return description;
   }
 
   _parsePoster(doc) {
-    let poster = null;
-
-    try {
-      let node = doc.evaluate(
-        '//*[@id="__next"]/div[2]/div[2]/div[2]/div[2]/div/div[1]/div/div/div[1]/div/a/img',
-        doc,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-      if (node) {
-        poster = node.src;
-      }
-    } catch (error) {
-      console.log('Постер не найден по первому пути');
-    }
-
-    if (!poster) {
-      try {
-        let node = doc.evaluate(
-          '//*[@id="__next"]/div[2]/div[2]/div[1]/div[2]/div/div[1]/div/div/div[1]/div/a/img',
-          doc,
-          null,
-          XPathResult.FIRST_ORDERED_NODE_TYPE,
-          null
-        ).singleNodeValue;
-        if (node) {
-          poster = node.src;
-        }
-      } catch (error) {
-        console.log('Постер не найден по второму пути');
-      }
-    }
+    const xpath = '//img[contains(@class, "film-poster")]';
+    const posterElement = this._findElementByXPath(doc, xpath);
+    const poster = posterElement.src;
 
     return poster;
   }
 
   _parseYear(doc) {
-    return parseInt(doc.querySelector('[data-tid="cfbe5a01"]').textContent);
+    const yearElement = doc.querySelector('[data-tid="cfbe5a01"]');
+    const year = parseInt(yearElement.textContent);
+
+    return year;
   }
-  /* need to fix */
+
   _parseCountry(doc) {
-    return doc.evaluate(
-      '//*[@id="__next"]/div[2]/div[2]/div[2]/div[2]/div/div[3]/div/div/div[2]/div[1]/div/div[2]/div[2]/a',
-      doc,
-      null,
-      XPathResult.FIRST_ORDERED_NODE_TYPE,
-      null
-    ).singleNodeValue?.textContent;
+    const xpath = '//div[contains(div, "Страна")]/div/a';
+    const countryElement = this._findElementByXPath(doc, xpath);
+    const country = countryElement.textContent;
+
+    return country;
   }
 
   _parseGenres(doc) {
     const genres = [];
+    const xpath = '//div[contains(div, "Жанр")]/div/div/a';
 
     const genreElements = doc.evaluate(
-      '//*[@id="__next"]/div[2]/div[2]/div[2]/div[2]/div/div[3]/div/div/div[2]/div[1]/div/div[3]/div[2]/div/a',
+      xpath,
       doc,
       null,
       XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
@@ -136,62 +141,42 @@ class MoviesScrapper {
 
     return genres;
   }
-  /* need to fix */
+
   _parseDirector(doc) {
-    let director = null;
+    const xpath = '//div[contains(div, "Режиссер")]/div/a';
+    const directorElement = this._findElementByXPath(doc, xpath);
+    const director = directorElement.textContent;
 
-    try {
-      let node = doc.evaluate(
-        '//*[@id="__next"]/div[2]/div[2]/div[1]/div[2]/div/div[3]/div/div/div[2]/div[1]/div/div[5]/div[2]/a',
-        doc,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-      if (node) {
-        director = node.textContent;
-      }
-    } catch (error) {
-      console.error(error);
-    }
-
-    if (!director) {
-      try {
-        let node = doc.evaluate(
-          '//*[@id="__next"]/div[2]/div[2]/div[2]/div[2]/div/div[3]/div/div/div[2]/div[1]/div/div[7]/div[2]/a',
-          doc,
-          null,
-          XPathResult.FIRST_ORDERED_NODE_TYPE,
-          null
-        ).singleNodeValue;
-        if (node) {
-          director = node.textContent;
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    }
+    return director;
   }
 
   _parseBudget(doc) {
-    return doc.evaluate(
-      '//*[@id="__next"]/div[2]/div[2]/div[2]/div[2]/div/div[3]/div/div/div[2]/div[1]/div/div[11]/div[2]/a',
-      doc,
-      null,
-      XPathResult.FIRST_ORDERED_NODE_TYPE,
-      null
-    ).singleNodeValue?.textContent;
+    const xpath = '//div[contains(div, "Бюджет")]/div/a';
+    const budgetElement = this._findElementByXPath(doc, xpath);
+    const budget = budgetElement?.textContent;
+
+    return budget;
   }
 
   _parseRating(doc) {
-    return parseFloat(doc.querySelector('[data-tid="939058a8"]').textContent);
+    const ratingElement = doc.querySelector('[data-tid="939058a8"]');
+    const rating = parseFloat(ratingElement.textContent);
+
+    return rating;
+  }
+
+  _parseDuration(doc) {
+    const xpath = '//div[contains(text(), "мин.")]';
+    const durationElement = this._findElementByXPath(doc, xpath);
+    const minutes = parseInt(durationElement.textContent);
+
+    return minutes;
   }
 
   _parseMovie(html) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = this._parseHTMLDocument(html);
 
-    const id = '';
+    const id = this._parseId(doc);
 
     const title = this._parseTitle(doc);
 
@@ -211,6 +196,8 @@ class MoviesScrapper {
 
     const rating = this._parseRating(doc);
 
+    const duration = this._parseDuration(doc);
+
     return {
       id,
       title,
@@ -222,7 +209,50 @@ class MoviesScrapper {
       director,
       budget,
       rating,
+      duration,
     };
+  }
+
+  findMovie(query) {
+    const searchTerm = query.toLowerCase();
+    const matchedMovies = this._movies.filter(
+      ({ title, description }) =>
+        title.toLowerCase().includes(searchTerm) ||
+        description.toLowerCase().includes(searchTerm)
+    );
+
+    return matchedMovies;
+  }
+
+  getMovie(id) {
+    return this._movies.find((movie) => movie.id === id);
+  }
+
+  getMoviesByYear(year) {
+    return this._movies.filter((movie) => movie.year === year);
+  }
+
+  getRandomMovie(genre = null) {
+    let movies = this._movies;
+
+    if (genre) {
+      const lowercaseGenre = genre.toLowerCase();
+      movies = this._movies.filter((movie) =>
+        movie.genres.includes(lowercaseGenre)
+      );
+    }
+
+    const randomIndex = Math.floor(Math.random() * movies.length);
+    return movies[randomIndex];
+  }
+
+  searchMoviesByDuration(minDuration, maxDuration) {
+    const filteredMovies = this._movies.filter((movie) => {
+      const { duration } = movie;
+      return duration >= minDuration && duration <= maxDuration;
+    });
+
+    return filteredMovies;
   }
 }
 

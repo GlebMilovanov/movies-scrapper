@@ -1,8 +1,6 @@
-import MoviesScrapper from "./MoviesScraper.js";
+import MoviesScrapper from './MoviesScraper.js';
 
 const scrapper = new MoviesScrapper();
 window.scrapper = scrapper;
 
-
-
-scrapper.loadMovies()
+window.scrapper.loadMovies();
