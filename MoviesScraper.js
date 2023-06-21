@@ -5,6 +5,8 @@ class MoviesScrapper {
   }
 
   async loadMovies() {
+    const groupSize = 10;
+
     let page = 1;
     let hasMovies = true;
 
@@ -12,13 +14,40 @@ class MoviesScrapper {
       const link = `https://www.kinopoisk.ru/lists/movies/top250/?page=${page}`;
       const html = await this._fetchMoviesHTML(link);
       const links = this._extractMovieLinks(html);
+
       if (links.length === 0) {
         hasMovies = false;
       } else {
-        await this._loadMoviesFromLinks(links);
+        const linkGroups = this._splitIntoGroups(links, groupSize);
+        await Promise.all(
+          linkGroups.map(this._loadMoviesFromLinks.bind(this))
+        );
+
         page++;
       }
     }
+  }
+
+  _splitIntoGroups(array, groupSize) {
+    const groups = [];
+    for (let i = 0; i < array.length; i += groupSize) {
+      const group = array.slice(i, i + groupSize);
+      groups.push(group);
+    }
+
+    return groups;
+  }
+
+  async _loadMoviesFromLinks(links) {
+    const movies = await Promise.all(
+      links.map(async (link) => {
+        const html = await this._fetchMoviesHTML(link);
+        const movie = this._parseMovie(html);
+        return movie;
+      })
+    );
+
+    this._movies.push(...movies);
   }
 
   async _fetchMoviesHTML(link) {
