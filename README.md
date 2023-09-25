@@ -22,6 +22,7 @@ await scrapper.loadMovies();
 const movies = scrapper.findMovie('Интерстеллар');
 
 // И так далее...
+```
 
 # 🎬 MoviesScrapper
 
